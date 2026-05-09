@@ -54,6 +54,22 @@ export async function checkName(name: string): Promise<{isValid: boolean; messag
     }
 }
 
+export async function checkEmail(email: string): Promise<{isValid: boolean; message? : string}> {
+    if (!email) {
+        return {isValid: false, message: "Email required"};
+    }
+    try {
+        const user = await (sql<{count: number}[]>`SELECT COUNT(*) FROM users WHERE email=${email}`);
+        if (user[0].count != 0) {
+            return {isValid: false, message: "Email is already taken"};
+        }
+        return {isValid: true};
+    } catch (error) {
+        console.error("Error checking email availability: ", error);
+        return {isValid: false, message: "Error checking email availability"};
+    }
+}
+
 export function checkPassword(password: string, repassword: string): {isValid: boolean; message?: string} {
     if (!password || password.length < 11) {
         return {isValid: false, message: "Password must be at least 11 characters"};

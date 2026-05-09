@@ -2,7 +2,7 @@
 import postgres from "postgres";
 import {revalidatePath} from "next/cache";
 import {redirect} from "next/navigation";
-import {signIn, auth, checkName, checkPassword} from "@/auth";
+import {signIn, auth, checkName, checkEmail, checkPassword} from "@/auth";
 import { AuthError } from "next-auth";
 import { z } from "zod";
 import bcrypt from "bcrypt";
@@ -20,7 +20,7 @@ const UserSchema = z.object({
     date: z.string()
 });
 
-const CreateUser = UserSchema.omit({id: true});
+const CreateUser = UserSchema.omit({id: true, date: true});
 
 export type UserState = {
     errors?: {
@@ -41,8 +41,8 @@ export async function createUser(prevState: UserState | undefined, formData: For
     });
     if (!validatedFields.success) {
         return {
-            errors: validatedFields.error.flatten().fieldErrors,
-            message: "Missing Fields. Failed to create user."
+            errors: validatedFields.error.flatten(i => i.message).fieldErrors,
+            message: validatedFields.error.issues.map(i => i.message).join(", ")
         };
     }
     const {name, email, password, repassword} = validatedFields.data;
@@ -51,6 +51,13 @@ export async function createUser(prevState: UserState | undefined, formData: For
         return {
             errors: null,
             message: nameResponse.message
+        };
+    }
+    const emailResponse = await checkEmail(email);
+    if (!emailResponse.isValid) {
+        return {
+            errors: null,
+            message: emailResponse.message
         };
     }
     const passwordResponse = checkPassword(password, repassword);
@@ -63,10 +70,9 @@ export async function createUser(prevState: UserState | undefined, formData: For
     const hashedPassword = await bcrypt.hash(password, 10);
     const date = new Date().toISOString().split("T")[0];
     try {
-        await sql` 
+        await sql`
         INSERT INTO users (name, email, password, date)
-        VALUES (${name}, ${email}, ${hashedPassword}, ${date})
-        ON CONFLICT (id) DO NOTHING;
+        VALUES (${name}, ${email}, ${hashedPassword}, ${date});
         `;
         await signIn("credentials", formData);
     } catch (error) {
@@ -148,7 +154,7 @@ export async function createOutfit(prevState: OutfitState | undefined, formData:
     if (!validatedFields.success) {
         return {
             errors: validatedFields.error.flatten().fieldErrors,
-            message: "Missing Fields. Failed to create outfit."
+            message: `${validatedFields.error.flatten().fieldErrors}. Failed to create outfit.`
         };
     }
     const {name, shirtImageUrl, pantsImageUrl, shoesImageUrl, hatAccessoryImageUrl, glassesAccessoryImageUrl, earPiercingsAccessoryImageUrl, neckAccessoryImageUrl, wristAccessoryImageUrl, pantsAccessoryImageUrl, bagAccessoryImageUrl, personalRating, rotationStatus} = validatedFields.data;

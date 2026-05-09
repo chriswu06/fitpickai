@@ -32,7 +32,7 @@ export default async function OutfitsTable({
                                                 {outfit.name ?? `${outfit.user_name}'s outfit`} | Created on {outfit.date} | {outfit.rotation_status}
                                             </p>
                                             <Image
-                                            src = "@/app/public/clothes-hanger.jpg"
+                                            src = "/clothes-hanger.jpg"
                                             alt = "Clothes hanger"
                                             className = "mx-auto"
                                             width = {75}

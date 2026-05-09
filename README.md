@@ -9,7 +9,7 @@ Built with Next.js, Tailwind CSS, Supabase, and Vercel.
 - **Frontend**: [Next.js](https://nextjs.org/)
 - **Styling**: [Tailwind CSS](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/) 
 - **Backend / Database**: [Supabase](https://supabase.com/) (Postgres, Auth, Storage)
-- **Hosting**: [Vercel](https://vercel.com/) (CI/CD from GitHub)
+- **Hosting**: [Vercel](https://vercel.com/)
 
 ## Getting Started
 

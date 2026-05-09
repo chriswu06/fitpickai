@@ -19,7 +19,7 @@ async function AnimatedNumUsers() {
 
 export default function Page() {
     return (
-        <main className = "flex min-h-screen flex-col p-6">
+        <main className = "flex flex-col p-6 min-h-[200vh]">
             <FadingFitPickAILogo/>
             <br/>
             <div className="mt-4 flex grow flex-col gap-4 md:flex-row">

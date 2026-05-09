@@ -33,7 +33,7 @@ export async function fetchPersonalRatings() {
 export async function fetchLatestOutfits() {
     try {
         const data = await sql<ViewerOutfit[]>`
-            SELECT outfits.id, outfits.user_id, outfits.name, users.name, outfits.shirt_image_url, outfits.pants_image_url, outfits.shoes_image_url, outfits.hat_accessory_image_url, outufits.glasses_accessory_image_url, outfits.ear_piercings_accessory_image_url, outfits.neck_accessory_image_url, outfits.wrist_accessory_image_url, outfits.pants_accessory_image_url, outfits.bag_accessory_image_url, outfits.rotation_status, outfits.date
+            SELECT outfits.id, outfits.user_id, outfits.name, users.name, outfits.shirt_image_url, outfits.pants_image_url, outfits.shoes_image_url, outfits.hat_accessory_image_url, outfits.glasses_accessory_image_url, outfits.ear_piercings_accessory_image_url, outfits.neck_accessory_image_url, outfits.wrist_accessory_image_url, outfits.pants_accessory_image_url, outfits.bag_accessory_image_url, outfits.rotation_status, outfits.date
             FROM outfits
             JOIN users ON outfits.user_id = users.id
             ORDER BY outfits.date DESC
@@ -68,7 +68,7 @@ export async function fetchFilteredOutfits(query: string, currentPage: number) {
     const offset = (currentPage - 1) * OUTFITS_PER_PAGE;
     try {
         const outfits = await sql<ViewerOutfit[]>`
-            SELECT outfits.id, outfits.user_id, outfits.name, users.name, outfits.shirt_image_url, outfits.pants_image_url, outfits.shoes_image_url, outfits.hat_accessory_image_url, outufits.glasses_accessory_image_url, outfits.ear_piercings_accessory_image_url, outfits.neck_accessory_image_url, outfits.wrist_accessory_image_url, outfits.pants_accessory_image_url, outfits.bag_accessory_image_url, outfits.rotation_status, outfits.date
+            SELECT outfits.id, outfits.user_id, outfits.name, users.name, outfits.shirt_image_url, outfits.pants_image_url, outfits.shoes_image_url, outfits.hat_accessory_image_url, outfits.glasses_accessory_image_url, outfits.ear_piercings_accessory_image_url, outfits.neck_accessory_image_url, outfits.wrist_accessory_image_url, outfits.pants_accessory_image_url, outfits.bag_accessory_image_url, outfits.rotation_status, outfits.date::text AS date
             FROM outfits
             JOIN users ON outfits.user_id = users.id
             WHERE
@@ -109,7 +109,7 @@ export async function fetchOutfitsPages(query: string) {
 export async function fetchOutfitById(id: string) {
     try {
         const data = await sql<ViewerOutfit[]>`
-        SELECT outfits.id, outfits.user_id, outfits.name, outfits.shirt_image_url, outfits.pants_image_url, outfits.shoes_image_url, outfits.hat_accessory_image_url, outufits.glasses_accessory_image_url, outfits.ear_piercings_accessory_image_url, outfits.neck_accessory_image_url, outfits.wrist_accessory_image_url, outfits.pants_accessory_image_url, outfits.bag_accessory_image_url, outfits.rotation_status, outfits.date
+        SELECT outfits.id, outfits.user_id, outfits.name, outfits.shirt_image_url, outfits.pants_image_url, outfits.shoes_image_url, outfits.hat_accessory_image_url, outfits.glasses_accessory_image_url, outfits.ear_piercings_accessory_image_url, outfits.neck_accessory_image_url, outfits.wrist_accessory_image_url, outfits.pants_accessory_image_url, outfits.bag_accessory_image_url, outfits.rotation_status, outfits.date
         FROM outfits
         WHERE outfits.id = ${id}
         `;
@@ -123,17 +123,18 @@ export async function fetchOutfitById(id: string) {
 export async function fetchUsers() {
     try {
         const users = await sql<UserField[]>`
-        SELECT 
+        SELECT
         users.id,
-        users.name, 
-        users.email, 
-        COUNT(outfits.id) AS total_outfits, 
-        COUNT(CASE WHEN outfits.rotation_status = 'In rotation') AS total_in_rotation,
-        COUNT(CASE WHEN outfits.rotation_status = 'Out of rotation') AS total_out_of_rotation,
+        users.name,
+        users.email,
+        COUNT(outfits.id) AS total_outfits,
+        COUNT(CASE WHEN outfits.rotation_status = 'In rotation' THEN 1 END) AS total_in_rotation,
+        COUNT(CASE WHEN outfits.rotation_status = 'Out of rotation' THEN 1 END) AS total_out_of_rotation,
         AVG(outfits.personal_rating) AS avg_self_rating
-        FROM users 
+        FROM users
         LEFT JOIN outfits ON users.id = outfits.user_id
-        ORDER BY name ASC LIMIT 25
+        GROUP BY users.id, users.name, users.email
+        ORDER BY users.name ASC LIMIT 25
         `;
         return users;
     } catch (error) {
@@ -145,19 +146,20 @@ export async function fetchUsers() {
 export async function fetchFilteredUsers(query: string) {
     try {
         const data = await sql<UserField[]>`
-        SELECT 
-        users.id
-        users.name, 
-        users.email, 
-        COUNT(outfits.id) AS total_outfits, 
-        COUNT(CASE WHEN outfits.rotation_status = 'In rotation') AS total_in_rotation,
-        COUNT(CASE WHEN outfits.rotation_status = 'Out of rotation') AS total_out_of_rotation,
+        SELECT
+        users.id,
+        users.name,
+        users.email,
+        COUNT(outfits.id) AS total_outfits,
+        COUNT(CASE WHEN outfits.rotation_status = 'In rotation' THEN 1 END) AS total_in_rotation,
+        COUNT(CASE WHEN outfits.rotation_status = 'Out of rotation' THEN 1 END) AS total_out_of_rotation,
         AVG(outfits.personal_rating) AS avg_self_rating
-        FROM users 
+        FROM users
         LEFT JOIN outfits ON users.id = outfits.user_id
-        WHERE 
-        users.name ILIKE ${`%${query}`} OR
-        users.email ILIKE ${`%${query}`}
+        WHERE
+        users.name ILIKE ${`%${query}%`} OR
+        users.email ILIKE ${`%${query}%`}
+        GROUP BY users.id, users.name, users.email
         ORDER BY users.name ASC LIMIT 10
         `;
         return data;

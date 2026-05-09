@@ -6,3 +6,4 @@
 ### Complete the entire dashboard
 ### Complete the ui outfits forms, and table
 ## For the outfits forms, for MVP don't focus on camera + ML clothes detection and extraction, just upload image.
+### Add GAuth
