@@ -15,6 +15,11 @@ export const authConfig = {
                 return Response.redirect(new URL("/dashboard", nextUrl));
             }
             return true;
+        },
+        // token.sub holds our users.id (set in the jwt callback in auth.ts).
+        session({session, token}) {
+            if (token.sub && session.user) session.user.id = token.sub;
+            return session;
         }
     },
     providers: [],

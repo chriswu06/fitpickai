@@ -2,6 +2,7 @@ import FitPickAILogo from "@/app/ui/fitpickai-logo";
 import RegisterForm from "@/app/ui/register-form";
 import { Suspense } from "react";
 import { Metadata } from "next";
+import GoogleSignIn from "@/app/ui/google-sign-in";
 
 export const metadata: Metadata = {
     title: "Register"
@@ -19,6 +20,7 @@ export default function RegisterPage() {
                 <Suspense fallback = {<p>Hang on, getting the register page...</p>}>
                 <RegisterForm />
                 </Suspense>
+                <GoogleSignIn />
             </div>
         </main>
     );

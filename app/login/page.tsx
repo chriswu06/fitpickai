@@ -2,6 +2,7 @@ import FitPickAILogo from "@/app/ui/fitpickai-logo";
 import LoginForm from "@/app/ui/login-form";
 import { Suspense } from "react";
 import { Metadata } from "next";
+import GoogleSignIn from "@/app/ui/google-sign-in";
 
 export const metadata: Metadata = {
     title: "Login"
@@ -19,6 +20,7 @@ export default function LoginPage() {
                 <Suspense fallback = {<p>Hang on, getting the login page...</p>}>
                 <LoginForm />
                 </Suspense>
+                <GoogleSignIn />
             </div>
         </main>
     );

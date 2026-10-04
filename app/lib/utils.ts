@@ -3,7 +3,9 @@ export const formatDateToLocal = (dateStr: string, locale: string = 'en-US') => 
     const options: Intl.DateTimeFormatOptions = {
         day: 'numeric',
         month: 'short',
-        year: 'numeric'
+        year: 'numeric',
+        // Plain YYYY-MM-DD strings parse as UTC midnight; format in UTC so they don't shift a day.
+        ...(/^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? {timeZone: 'UTC'} : {})
     };
     const formatter = new Intl.DateTimeFormat(locale, options);
     return formatter.format(date);

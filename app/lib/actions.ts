@@ -1,15 +1,14 @@
 "use server";
-import postgres from "postgres";
 import {revalidatePath} from "next/cache";
 import {redirect} from "next/navigation";
-import {signIn, auth, checkName, checkEmail, checkPassword} from "@/auth";
-import { AuthError } from "next-auth";
-import { z } from "zod";
+import {signIn, checkName, checkEmail, checkPassword} from "@/auth";
+import {AuthError} from "next-auth";
+import {z} from "zod";
 import bcrypt from "bcrypt";
-
-const sql = postgres(process.env.POSTGRES_URL!, {
-    ssl: "require"
-});
+import {sql} from "@/app/lib/db";
+import {requireUserId} from "@/app/lib/session";
+import {OUTFIT_SLOTS, Outfit, OutfitImageColumn} from "@/app/lib/definitions";
+import {isUploadedFile, validateImage, uploadOutfitImage, deleteOutfitImages} from "@/app/lib/storage";
 
 const UserSchema = z.object({
     id: z.string(),
@@ -41,7 +40,7 @@ export async function createUser(prevState: UserState | undefined, formData: For
     });
     if (!validatedFields.success) {
         return {
-            errors: validatedFields.error.flatten(i => i.message).fieldErrors,
+            errors: z.flattenError(validatedFields.error).fieldErrors,
             message: validatedFields.error.issues.map(i => i.message).join(", ")
         };
     }
@@ -88,135 +87,201 @@ export async function createUser(prevState: UserState | undefined, formData: For
     }
 }
 
-const FormSchema = z.object({
-    id: z.string(),
-    userId: z.string(),
-    date: z.string(),
-    name: z.string().optional(),
-    shirtImageUrl: z.string({message: "Please choose a valid shirt."}),
-    pantsImageUrl: z.string({message: "Please choose a valid pair of pants or shorts."}),
-    shoesImageUrl: z.string({message: "Please choose a valid pair of shoes."}),
-    hatAccessoryImageUrl: z.string().optional(),
-    glassesAccessoryImageUrl: z.string().optional(),
-    earPiercingsAccessoryImageUrl: z.string().optional(),
-    neckAccessoryImageUrl: z.string().optional(),
-    wristAccessoryImageUrl: z.string().optional(),
-    pantsAccessoryImageUrl: z.string().optional(),
-    bagAccessoryImageUrl: z.string().optional(),
-    personalRating: z.coerce.number().min(0).max(10, { message: "Please enter a rating between 1 and 10." }),
-    rotationStatus: z.enum(["In rotation", "Out of rotation"], { message: "Please select a valid value for this outfit's rotation status."}),
+// Empty form values ("" or missing) become undefined so optional/required checks behave.
+const blankToUndefined = (v: unknown) => (v === "" || v === null ? undefined : v);
+
+const OutfitDetailsSchema = z.object({
+    name: z.preprocess(blankToUndefined, z.string().trim().max(255, {message: "Name must be 255 characters or fewer."}).optional()),
+    personalRating: z.preprocess(
+        blankToUndefined,
+        z.coerce.number({message: "Please select a rating."}).int().min(0, {message: "Please enter a rating between 0 and 10."}).max(10, {message: "Please enter a rating between 0 and 10."})
+    ),
+    rotationStatus: z.enum(["In rotation", "Out of rotation"], {message: "Please select a valid value for this outfit's rotation status."}),
 });
 
-const CreateOutfit = FormSchema.omit({id: true, userId: true, date: true});
-const UpdateOutfit = FormSchema.omit({id: true, userId: true, date: true});
-
 export type OutfitState = {
-    errors?: {
-        name?: string[];
-        shirtImageUrl?: string[];
-        pantsImageUrl?: string[];
-        shoesImageUrl?: string[];
-        hatAccessoryImageUrl?: string[];
-        glassesAccessoryImageUrl?: string[];
-        earPiercingsAccessoryImageUrl?: string[];
-        neckAccessoryImageUrl?: string[];
-        wristAccessoryImageUrl?: string[];
-        pantsAccessoryImageUrl?: string[];
-        bagAccessoryImageUrl?: string[];
-        personalRating?: string[];
-        rotationStatus?: string[];
-    } | null;
+    errors?: Partial<Record<string, string[]>> | null;
     message?: string | null;
 };
 
-export async function createOutfit(prevState: OutfitState | undefined, formData: FormData): Promise<OutfitState | undefined> {
-    const session = await auth();
-    if (!session?.user?.id) {
-        throw new Error("You must be logged in to create an outfit.");
-    }
-    const userId = session.user.id;
-    const userName = await sql`SELECT name FROM users WHERE id = ${userId}`;
-    const validatedFields = CreateOutfit.safeParse({
+function parseOutfitDetails(formData: FormData) {
+    return OutfitDetailsSchema.safeParse({
         name: formData.get("name"),
-        shirtImageUrl: formData.get("shirtImageUrl"),
-        pantsImageUrl: formData.get("pantsImageUrl"),
-        shoesImageUrl: formData.get("shoesImageUrl"),
-        hatAccessoryImageUrl: formData.get("hatAccessoryImageUrl"),
-        glassesAccessoryImageUrl: formData.get("glassesAccessoryImageUrl"),
-        earPiercingsAccessoryImageUrl: formData.get("earPiercingsAccessoryImageUrl"),
-        neckAccessoryImageUrl: formData.get("neckAccessoryImageUrl"),
-        wristAccessoryImageUrl: formData.get("wristAccessoryImageUrl"),
-        pantsAccessoryImageUrl: formData.get("pantsAccessoryImageUrl"),
-        bagAccessoryImageUrl: formData.get("bagAccessoryImageUrl"),
         personalRating: formData.get("personalRating"),
-        rotationStatus: formData.get("rotationStatus")
+        rotationStatus: formData.get("rotationStatus"),
     });
-    if (!validatedFields.success) {
-        return {
-            errors: validatedFields.error.flatten().fieldErrors,
-            message: `${validatedFields.error.flatten().fieldErrors}. Failed to create outfit.`
-        };
+}
+
+// Validates image inputs. `existing` is the outfit being edited, if any; required slots can fall back to it.
+function collectImageFiles(formData: FormData, existing?: Outfit) {
+    const files: {column: OutfitImageColumn; key: string; file: File}[] = [];
+    const removals: OutfitImageColumn[] = [];
+    const errors: Record<string, string[]> = {};
+    for (const slot of OUTFIT_SLOTS) {
+        const value = formData.get(slot.key);
+        if (isUploadedFile(value)) {
+            const problem = validateImage(value);
+            if (problem) errors[slot.key] = [problem];
+            else files.push({column: slot.column, key: slot.key, file: value});
+        } else if (slot.required && !existing?.[slot.column]) {
+            errors[slot.key] = [`Please upload a photo of your ${slot.label.toLowerCase()}.`];
+        } else if (!slot.required && formData.get(`remove-${slot.key}`) === "on") {
+            removals.push(slot.column);
+        }
     }
-    const {name, shirtImageUrl, pantsImageUrl, shoesImageUrl, hatAccessoryImageUrl, glassesAccessoryImageUrl, earPiercingsAccessoryImageUrl, neckAccessoryImageUrl, wristAccessoryImageUrl, pantsAccessoryImageUrl, bagAccessoryImageUrl, personalRating, rotationStatus} = validatedFields.data;
-    const date = new Date().toISOString().split("T")[0];
+    return {files, removals, errors};
+}
+
+async function uploadAll(userId: string, files: {column: OutfitImageColumn; key: string; file: File}[]) {
+    const urls = await Promise.all(files.map(f => uploadOutfitImage(userId, f.key, f.file)));
+    return Object.fromEntries(files.map((f, i) => [f.column, urls[i]])) as Partial<Record<OutfitImageColumn, string>>;
+}
+
+const today = () => new Date().toISOString().split("T")[0];
+
+export async function createOutfit(prevState: OutfitState | undefined, formData: FormData): Promise<OutfitState | undefined> {
+    const userId = await requireUserId();
+    const details = parseOutfitDetails(formData);
+    const images = collectImageFiles(formData);
+    const fieldErrors = {...(details.success ? {} : z.flattenError(details.error).fieldErrors), ...images.errors};
+    if (!details.success || Object.keys(images.errors).length > 0) {
+        return {errors: fieldErrors, message: "Missing or invalid fields. Failed to create outfit."};
+    }
+    const {name, personalRating, rotationStatus} = details.data;
+
+    let uploaded: Partial<Record<OutfitImageColumn, string>> = {};
     try {
-        await sql`
-            INSERT INTO outfits (user_id, date, name, shirt_image_url, pants_image_url, shoes_image_url, hat_accessory_image_url, glasses_accessory_image_url, ear_piercings_accessory_image_url, neck_accessory_image_url, wrist_accessory_image_url, pants_accessory_image_url, bag_accessory_image_url, personal_rating, rotation_status)
-            VALUES (${userId}, ${date}, ${name ?? `${userName}'s' Outfit - ${date}`}, ${shirtImageUrl}, ${pantsImageUrl}, ${shoesImageUrl}, ${hatAccessoryImageUrl ?? null}, ${glassesAccessoryImageUrl ?? null}, ${earPiercingsAccessoryImageUrl ?? null}, ${neckAccessoryImageUrl ?? null}, ${wristAccessoryImageUrl ?? null}, ${pantsAccessoryImageUrl ?? null}, ${bagAccessoryImageUrl ?? null}, ${personalRating}, ${rotationStatus})
-        `;
+        uploaded = await uploadAll(userId, images.files);
     } catch (error) {
-        console.error(error);
+        console.error("Upload Error: ", error);
+        return {errors: null, message: "Failed to upload images. Please try again."};
     }
-    revalidatePath("/dashboard/outfits");
+
+    const date = today();
+    try {
+        const [user] = await sql<{name: string}[]>`SELECT name FROM users WHERE id = ${userId}`;
+        const row = {
+            user_id: userId,
+            date,
+            name: name ?? `${user?.name ?? "My"}'s outfit - ${date}`,
+            personal_rating: personalRating,
+            rotation_status: rotationStatus,
+            ...Object.fromEntries(OUTFIT_SLOTS.map(s => [s.column, uploaded[s.column] ?? null])),
+        };
+        await sql.begin(async (tx) => {
+            const [outfit] = await tx`INSERT INTO outfits ${tx(row)} RETURNING id`;
+            await tx`
+                INSERT INTO personal_ratings (user_id, outfit_id, date, rating)
+                VALUES (${userId}, ${outfit.id}, ${date}, ${personalRating})
+            `;
+        });
+    } catch (error) {
+        console.error("Database Error: ", error);
+        await deleteOutfitImages(Object.values(uploaded));
+        return {errors: null, message: "Database error. Failed to create outfit."};
+    }
+    revalidatePath("/dashboard", "layout");
     redirect("/dashboard/outfits");
 }
 
-export async function updateOutfit(id: string, prevState: OutfitState, formData: FormData) {
-    const session = await auth();
-    if (!session?.user?.id) {
-        throw new Error("You must be logged in to update an outfit.");
+export async function updateOutfit(id: string, prevState: OutfitState | undefined, formData: FormData): Promise<OutfitState | undefined> {
+    const userId = await requireUserId();
+    const [existing] = await sql<Outfit[]>`SELECT * FROM outfits WHERE id = ${id} AND user_id = ${userId}`;
+    if (!existing) {
+        return {errors: null, message: "Outfit not found."};
     }
-    const userId = session.user.id;
-    const userName = await sql`SELECT name FROM users WHERE id = ${userId}`;
-    const validatedFields = UpdateOutfit.safeParse({
-        name: formData.get("name"),
-        shirtImageUrl: formData.get("shirtImageUrl"),
-        pantsImageUrl: formData.get("pantsImageUrl"),
-        shoesImageUrl: formData.get("shoesImageUrl"),
-        hatAccessoryImageUrl: formData.get("hatAccessoryImageUrl"),
-        glassesAccessoryImageUrl: formData.get("glassesAccessoryImageUrl"),
-        earPiercingsAccessoryImageUrl: formData.get("earPiercingsAccessoryImageUrl"),
-        neckAccessoryImageUrl: formData.get("neckAccessoryImageUrl"),
-        wristAccessoryImageUrl: formData.get("wristAccessoryImageUrl"),
-        pantsAccessoryImageUrl: formData.get("pantsAccessoryImageUrl"),
-        bagAccessoryImageUrl: formData.get("bagAccessoryImageUrl"),
-        personalRating: formData.get("personalRating"),
-        rotationStatus: formData.get("rotationStatus")
-    });
-    if (!validatedFields.success) {
-        return {
-            errors: validatedFields.error.flatten().fieldErrors,
-            message: "Missing Fields. Failed to create outfit."
-        };
+    const details = parseOutfitDetails(formData);
+    const images = collectImageFiles(formData, existing);
+    const fieldErrors = {...(details.success ? {} : z.flattenError(details.error).fieldErrors), ...images.errors};
+    if (!details.success || Object.keys(images.errors).length > 0) {
+        return {errors: fieldErrors, message: "Missing or invalid fields. Failed to update outfit."};
     }
-    const {name, shirtImageUrl, pantsImageUrl, shoesImageUrl, hatAccessoryImageUrl, glassesAccessoryImageUrl, earPiercingsAccessoryImageUrl, neckAccessoryImageUrl, wristAccessoryImageUrl, pantsAccessoryImageUrl, bagAccessoryImageUrl, personalRating, rotationStatus} = validatedFields.data;
-    const date = new Date().toISOString().split("T")[0];
+    const {name, personalRating, rotationStatus} = details.data;
+
+    let uploaded: Partial<Record<OutfitImageColumn, string>> = {};
     try {
-        await sql`
-            UPDATE outfits
-            SET name = ${name ?? `${userName}'s Outfit - Updated ${date}`}, shirt_image_url = ${shirtImageUrl}, pants_image_url = ${pantsImageUrl}, shoes_image_url = ${shoesImageUrl}, hat_accessory_image_url = ${hatAccessoryImageUrl ?? null}, glasses_accessory_image_url = ${glassesAccessoryImageUrl ?? null}, ear_piercings_accessory_image_url = ${earPiercingsAccessoryImageUrl ?? null}, neck_accessory_image_url = ${neckAccessoryImageUrl ?? null}, wrist_accessory_image_url = ${wristAccessoryImageUrl ?? null}, pants_accessory_image_url = ${pantsAccessoryImageUrl ?? null}, bag_accessory_image_url = ${bagAccessoryImageUrl ?? null}, personal_rating = ${personalRating}, rotation_status = ${rotationStatus}
-            WHERE id = ${id}
-        `;
+        uploaded = await uploadAll(userId, images.files);
     } catch (error) {
-        console.log(error);
+        console.error("Upload Error: ", error);
+        return {errors: null, message: "Failed to upload images. Please try again."};
     }
-    revalidatePath("/dashboard/outfits");
+
+    const imageChanges: Partial<Record<OutfitImageColumn, string | null>> = {...uploaded};
+    for (const column of images.removals) imageChanges[column] = null;
+    const replacedUrls = Object.keys(imageChanges).map(c => existing[c as OutfitImageColumn]);
+
+    const changes = {
+        name: name ?? existing.name,
+        personal_rating: personalRating,
+        rotation_status: rotationStatus,
+        ...imageChanges,
+    };
+    try {
+        await sql.begin(async (tx) => {
+            await tx`UPDATE outfits SET ${tx(changes)} WHERE id = ${id} AND user_id = ${userId}`;
+            // Track rating history for the trend chart; one entry per day.
+            await tx`
+                INSERT INTO personal_ratings (user_id, outfit_id, date, rating)
+                VALUES (${userId}, ${id}, ${today()}, ${personalRating})
+                ON CONFLICT (user_id, outfit_id, date) DO UPDATE SET rating = EXCLUDED.rating
+            `;
+        });
+    } catch (error) {
+        console.error("Database Error: ", error);
+        await deleteOutfitImages(Object.values(uploaded));
+        return {errors: null, message: "Database error. Failed to update outfit."};
+    }
+    await deleteOutfitImages(replacedUrls);
+    revalidatePath("/dashboard", "layout");
     redirect("/dashboard/outfits");
 }
 
 export async function deleteOutfit(id: string) {
-    await sql`DELETE FROM outfits WHERE id = ${id}`;
-    revalidatePath("/dashboard/outfits");
+    const userId = await requireUserId();
+    const deleted = await sql.begin(async (tx) => {
+        await tx`DELETE FROM personal_ratings WHERE outfit_id = ${id} AND user_id = ${userId}`;
+        return tx<Outfit[]>`DELETE FROM outfits WHERE id = ${id} AND user_id = ${userId} RETURNING *`;
+    });
+    if (deleted[0]) {
+        await deleteOutfitImages(OUTFIT_SLOTS.map(s => deleted[0][s.column]));
+    }
+    revalidatePath("/dashboard", "layout");
+}
+
+export async function followUser(targetId: string) {
+    const userId = await requireUserId();
+    if (targetId === userId) return;
+    await sql`
+        INSERT INTO follows (follower_id, following_id)
+        VALUES (${userId}, ${targetId})
+        ON CONFLICT DO NOTHING
+    `;
+    revalidatePath("/dashboard", "layout");
+}
+
+export async function unfollowUser(targetId: string) {
+    const userId = await requireUserId();
+    await sql`DELETE FROM follows WHERE follower_id = ${userId} AND following_id = ${targetId}`;
+    revalidatePath("/dashboard", "layout");
+}
+
+const RatingSchema = z.coerce.number().int().min(0).max(10);
+
+// Rate someone else's outfit. Re-rating replaces your previous rating.
+export async function rateOutfit(outfitId: string, rating: number) {
+    const userId = await requireUserId();
+    const parsed = RatingSchema.safeParse(rating);
+    if (!parsed.success) return {message: "Rating must be between 0 and 10."};
+    const [outfit] = await sql`SELECT user_id FROM outfits WHERE id = ${outfitId}`;
+    if (!outfit) return {message: "Outfit not found."};
+    if (outfit.user_id === userId) return {message: "You can't rate your own outfit here. Edit it instead."};
+    await sql`
+        INSERT INTO outfit_ratings (rater_id, outfit_id, rating, date)
+        VALUES (${userId}, ${outfitId}, ${parsed.data}, ${today()})
+        ON CONFLICT (rater_id, outfit_id) DO UPDATE SET rating = EXCLUDED.rating, date = EXCLUDED.date
+    `;
+    revalidatePath("/dashboard", "layout");
+    return {message: null};
 }
 
 export async function authenticate(
@@ -236,4 +301,9 @@ export async function authenticate(
         }
         throw error;
     }
+}
+
+export async function signInWithGoogle(formData: FormData) {
+    const redirectTo = formData.get("redirectTo");
+    await signIn("google", {redirectTo: typeof redirectTo === "string" ? redirectTo : "/dashboard"});
 }

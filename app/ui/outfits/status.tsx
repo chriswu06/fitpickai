@@ -7,21 +7,21 @@ export default function OutfitStatus({ status }: { status: string }) {
       className={clsx(
         'inline-flex items-center rounded-full px-2 py-1 text-xs',
         {
-          'bg-gray-100 text-gray-500': status === 'pending',
-          'bg-green-500 text-white': status === 'paid',
+          'bg-green-500 text-white': status === 'In rotation',
+          'bg-gray-100 text-gray-500': status === 'Out of rotation',
         },
       )}
     >
       {status === 'In rotation' ? (
         <>
           In rotation
-          <CheckCircleIcon className="ml-1 w-4 text-gray-500" />
+          <CheckCircleIcon className="ml-1 w-4 text-white" />
         </>
       ) : null}
       {status === 'Out of rotation' ? (
         <>
           Out of rotation
-          <XCircleIcon className="ml-1 w-4 text-white" />
+          <XCircleIcon className="ml-1 w-4 text-gray-500" />
         </>
       ) : null}
     </span>

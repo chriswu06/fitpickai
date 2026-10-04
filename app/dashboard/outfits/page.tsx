@@ -19,7 +19,7 @@ export default async function OutfitsPage({
     return (
         <div className="w-full">
             <div className="flex w-full items-center justify-between">
-                <h1 className="text-2xl">Outfits</h1>
+                <h1 className="text-2xl">My Outfits</h1>
             </div>
             <div className="mt-4 flex items-center justify-between gap-2 md:mt-8">
                 <Suspense fallback={null}>

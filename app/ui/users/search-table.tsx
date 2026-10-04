@@ -1,8 +1,12 @@
 import {montserrat} from '@/app/ui/fonts';
 import Search from '@/app/ui/search';
+import Link from 'next/link';
 import {UserField} from '@/app/lib/definitions';
+import FollowButton from '@/app/ui/users/follow-button';
 
-export default async function ({users}: {users: UserField[]}) {
+const avgRating = (value: number | null) => (value === null ? 'no' : value);
+
+export default function UserSearchTable({users}: {users: UserField[]}) {
     return (
         <div className = "w-full">
             <h1 className = {`${montserrat.className} mb-8 text-xl md:text-2xl`}>
@@ -23,11 +27,11 @@ export default async function ({users}: {users: UserField[]}) {
                         <div>
                             <div className="mb-2 flex items-center">
                             <div className="flex items-center gap-3">
-                                <p>{user.name}</p>
+                                <Link href={`/dashboard/connect/${user.id}`} className="font-medium hover:underline">{user.name}</Link>
                             </div>
                             </div>
                             <p className="text-sm text-gray-500">
-                            {user.email} | {user.avg_self_rating} average self-rating
+                            {user.email} | {avgRating(user.avg_self_rating)} average self-rating
                             </p>
                         </div>
                         </div>
@@ -43,6 +47,9 @@ export default async function ({users}: {users: UserField[]}) {
                         </div>
                         <div className="pt-4 text-sm">
                         <p>{user.total_outfits} total outfits </p>
+                        </div>
+                        <div className="pt-4">
+                        <FollowButton userId={user.id} isFollowing={user.is_following} />
                         </div>
                     </div>
                     ))}
@@ -65,6 +72,9 @@ export default async function ({users}: {users: UserField[]}) {
                         <th scope="col" className="px-4 py-5 font-medium">
                         Total Outfits
                         </th>
+                        <th scope="col" className="px-4 py-5 font-medium">
+                        <span className="sr-only">Follow</span>
+                        </th>
                     </tr>
                     </thead>
 
@@ -73,11 +83,11 @@ export default async function ({users}: {users: UserField[]}) {
                         <tr key={user.id} className="group">
                         <td className="whitespace-nowrap bg-white py-5 pl-4 pr-3 text-sm text-black group-first-of-type:rounded-md group-last-of-type:rounded-md sm:pl-6">
                             <div className="flex items-center gap-3">
-                            <p>{user.name}</p>
+                            <Link href={`/dashboard/connect/${user.id}`} className="font-medium hover:underline">{user.name}</Link>
                             </div>
                         </td>
                         <td className="whitespace-nowrap bg-white px-4 py-5 text-sm">
-                            {user.email} | {user.avg_self_rating} average self-rating
+                            {user.email} | {avgRating(user.avg_self_rating)} average self-rating
                         </td>
                         <td className="whitespace-nowrap bg-white px-4 py-5 text-sm">
                             {user.total_in_rotation}
@@ -85,13 +95,19 @@ export default async function ({users}: {users: UserField[]}) {
                         <td className="whitespace-nowrap bg-white px-4 py-5 text-sm">
                             {user.total_out_of_rotation}
                         </td>
-                        <td className="whitespace-nowrap bg-white px-4 py-5 text-sm group-first-of-type:rounded-md group-last-of-type:rounded-md">
+                        <td className="whitespace-nowrap bg-white px-4 py-5 text-sm">
                             {user.total_outfits}
+                        </td>
+                        <td className="whitespace-nowrap bg-white px-4 py-5 text-right text-sm group-first-of-type:rounded-md group-last-of-type:rounded-md">
+                            <FollowButton userId={user.id} isFollowing={user.is_following} />
                         </td>
                         </tr>
                     ))}
                     </tbody>
                 </table>
+                {users.length === 0 && (
+                    <p className="p-6 text-center text-sm text-gray-500">No users found.</p>
+                )}
                 </div>
             </div>
             </div>

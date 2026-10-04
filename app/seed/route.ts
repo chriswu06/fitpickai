@@ -1,8 +1,6 @@
 import bcrypt from "bcrypt";
-import postgres from "postgres";
+import {sql} from "../lib/db";
 import {users, outfits, ratings} from "../lib/placeholder-data";
-
-const sql = postgres(process.env.POSTGRES_URL!, {ssl: "require"});
 
 async function seedUsers() {
     await sql`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`;
@@ -11,7 +9,7 @@ async function seedUsers() {
             id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
             name VARCHAR(255) NOT NULL,
             email TEXT NOT NULL UNIQUE,
-            password TEXT NOT NULL,
+            password TEXT,
             date DATE NOT NULL
         );
     `;
@@ -67,7 +65,7 @@ async function seedPersonalRatings() {
         CREATE TABLE IF NOT EXISTS personal_ratings (
             id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
             user_id UUID NOT NULL REFERENCES users(id),
-            outfit_id UUID NOT NULL REFERENCES outfits(id),
+            outfit_id UUID NOT NULL REFERENCES outfits(id) ON DELETE CASCADE,
             date DATE NOT NULL,
             rating INT NOT NULL,
             UNIQUE(user_id, outfit_id, date)
@@ -83,14 +81,46 @@ async function seedPersonalRatings() {
     return insertedRatings;
 }
 
+// Social tables; kept in sync with migrations/001_social_and_google.sql.
+async function seedSocial() {
+    await sql`
+        CREATE TABLE IF NOT EXISTS follows (
+            follower_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            following_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            date DATE NOT NULL DEFAULT CURRENT_DATE,
+            PRIMARY KEY (follower_id, following_id),
+            CHECK (follower_id <> following_id)
+        );
+    `;
+    await sql`
+        CREATE TABLE IF NOT EXISTS outfit_ratings (
+            rater_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            outfit_id UUID NOT NULL REFERENCES outfits(id) ON DELETE CASCADE,
+            rating INT NOT NULL CHECK (rating BETWEEN 0 AND 10),
+            date DATE NOT NULL DEFAULT CURRENT_DATE,
+            PRIMARY KEY (rater_id, outfit_id)
+        );
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS outfits_user_id_idx ON outfits(user_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS follows_following_id_idx ON follows(following_id)`;
+    await sql`CREATE INDEX IF NOT EXISTS outfit_ratings_outfit_id_idx ON outfit_ratings(outfit_id)`;
+}
+
 export async function GET() {
+    // This wipes every table. Never expose it in production.
+    if (process.env.NODE_ENV === "production") {
+        return Response.json({error: "Seeding is disabled in production."}, {status: 403});
+    }
     try {
+        await sql`DROP TABLE IF EXISTS outfit_ratings CASCADE`;
+        await sql`DROP TABLE IF EXISTS follows CASCADE`;
         await sql`DROP TABLE IF EXISTS personal_ratings CASCADE`;
         await sql`DROP TABLE IF EXISTS outfits CASCADE`;
         await sql`DROP TABLE IF EXISTS users CASCADE`;
         await seedUsers();
         await seedOutfits();
         await seedPersonalRatings();
+        await seedSocial();
         return Response.json({message: "Database seeded successfully."});
     } catch (error) {
         return Response.json({error}, {status: 500});
