@@ -87,7 +87,7 @@ export async function checkName(name: string): Promise<{isValid: boolean; messag
         return {isValid: true};
     } catch (error) {
         console.error("Error checking name availability: ", error);
-        return {isValid: false, message: "Error checking name availability"};
+        return {isValid: false, message: "Couldn't reach the database. Please try again later."};
     }
 }
 
@@ -103,7 +103,7 @@ export async function checkEmail(email: string): Promise<{isValid: boolean; mess
         return {isValid: true};
     } catch (error) {
         console.error("Error checking email availability: ", error);
-        return {isValid: false, message: "Error checking email availability"};
+        return {isValid: false, message: "Couldn't reach the database. Please try again later."};
     }
 }
 
