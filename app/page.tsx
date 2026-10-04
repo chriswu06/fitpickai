@@ -10,6 +10,9 @@ import { CountingNumber } from "@/components/ui/shadcn-io/counting-number";
 import { ColourfulText } from "@/components/ui/shadcn-io/colourful-text";
 import { Suspense } from "react";
 
+// Re-fetch the landing-page counts every 5 minutes instead of freezing them at build time.
+export const revalidate = 300;
+
 async function AnimatedNumOutfits() {
     let numberOfOutfits = 0;
     try {
@@ -31,7 +34,7 @@ async function AnimatedNumUsers() {
 
 export default function Page() {
     return (
-        <main className="relative flex flex-col min-h-screen bg-zinc-950 text-white">
+        <main className="relative flex min-h-screen flex-col overflow-x-hidden bg-zinc-950 text-white">
             <AuroraBackground />
 
             {/* Hero */}

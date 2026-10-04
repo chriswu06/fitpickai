@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
+import path from "node:path";
 
 const nextConfig: NextConfig = {
+  turbopack: {
+    root: path.join(__dirname),
+  },
   experimental: {
     // Outfit forms upload several photos through a server action (they're resized client-side first).
     serverActions: {

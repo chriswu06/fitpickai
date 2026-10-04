@@ -11,7 +11,7 @@ export default function FadingLogo() {
       transition={{ duration: 0.8, ease: "easeOut" }}
       className="flex items-center justify-center"
     >
-      <FitPickAILogo />
+      <FitPickAILogo variant="hero" />
     </motion.div>
   );
 }

@@ -1,10 +1,11 @@
+@import "tailwindcss";
+
+/* Tailwind v4 doesn't pick up tailwind.config.ts on its own. */
+@config "../../tailwind.config.ts";
+
 @plugin "tailwindcss-animate";
 
 @custom-variant dark (&:is(.dark *));
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
 
 input[type='number'] {
     -moz-appearance: textfield;
