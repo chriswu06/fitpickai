@@ -9,7 +9,7 @@ Built with Next.js, Tailwind CSS, Supabase, and Vercel.
 - **Frontend**: [Next.js](https://nextjs.org/)
 - **Styling**: [Tailwind CSS](https://tailwindcss.com/) + [shadcn/ui](https://ui.shadcn.com/) 
 - **Backend / Database**: [Supabase](https://supabase.com/) (Postgres, Auth, Storage)
-- **Hosting**: [Vercel](https://vercel.com/) (CI/CD from GitHub)
+- **Hosting**: [Vercel](https://vercel.com/)
 
 ## Getting Started
 
@@ -28,12 +28,7 @@ cd fitpickai
 npm i
 ```
 
-### 3. Create a local .env file and paste in the following fields
-
-```bash
-NEXT_PUBLIC_SUPABASE_URL =
-NEXT_PUBLIC_SUPABASE_ANON_KEY =
-```
+### 3. Create a local .env file and paste in the correct fields
 
 ### 4. Run dev server
 

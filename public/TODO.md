@@ -1,0 +1,1 @@
+### Upload the hero-desktop.png and hero-mobile.png once the page views are actually finished. These power @/app/page.tsx.
