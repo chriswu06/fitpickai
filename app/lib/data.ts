@@ -6,6 +6,8 @@ import {
     FeedOutfit,
     UserField,
     DashboardCards,
+    Wardrobe,
+    OUTFIT_SLOTS,
 } from "./definitions";
 
 // Columns shared by every outfit query. Dates come back as text so they're safe to render/serialize.
@@ -46,6 +48,45 @@ export async function fetchPersonalRatings() {
     } catch (error) {
         console.error("Database Error: ", error);
         throw new Error("Failed to fetch ratings data.");
+    }
+}
+
+// How friends' average rating of each of your outfits changed over time. Each point averages
+// every rater's most recent rating as of that day, so it matches the "Friends" average on the card.
+export async function fetchFriendRatingsTrend() {
+    const userId = await requireUserId();
+    try {
+        return await sql<PersonalRatingsTrend[]>`
+            WITH days AS (
+                SELECT DISTINCT h.outfit_id, h.date
+                FROM outfit_rating_history h
+                JOIN outfits ON h.outfit_id = outfits.id
+                WHERE outfits.user_id = ${userId}
+            ),
+            points AS (
+                SELECT days.outfit_id, days.date, AVG(latest.rating)::float8 AS rating
+                FROM days
+                CROSS JOIN LATERAL (
+                    SELECT DISTINCT ON (h.rater_id) h.rating
+                    FROM outfit_rating_history h
+                    WHERE h.outfit_id = days.outfit_id AND h.date <= days.date
+                    ORDER BY h.rater_id, h.date DESC
+                ) latest
+                GROUP BY days.outfit_id, days.date
+            )
+            SELECT
+                outfits.id AS outfit_id,
+                COALESCE(outfits.name, 'Untitled outfit') AS outfit_name,
+                json_agg(json_build_object('rating', ROUND(points.rating::numeric, 1), 'date', points.date::text) ORDER BY points.date) AS ratings
+            FROM points
+            JOIN outfits ON points.outfit_id = outfits.id
+            GROUP BY outfits.id, outfits.name
+            ORDER BY MAX(points.date) DESC
+            LIMIT 6
+        `;
+    } catch (error) {
+        console.error("Database Error: ", error);
+        throw new Error("Failed to fetch friends' ratings data.");
     }
 }
 
@@ -242,5 +283,40 @@ export async function fetchUserProfile(profileId: string) {
     } catch (error) {
         console.error("Database Error: ", error);
         return undefined;
+    }
+}
+
+// Every distinct piece of clothing across the signed-in user's outfits, grouped by slot.
+export async function fetchWardrobe(): Promise<Wardrobe> {
+    const userId = await requireUserId();
+    try {
+        const rows = await sql<Outfit[]>`
+            SELECT ${outfitColumns}, outfits.personal_rating
+            FROM outfits
+            WHERE outfits.user_id = ${userId}
+            ORDER BY outfits.date DESC, outfits.id
+        `;
+        const slots = OUTFIT_SLOTS.map(slot => {
+            const seen = new Map<string, string>();
+            for (const outfit of rows) {
+                const url = outfit[slot.column];
+                if (url && !seen.has(url)) seen.set(url, outfit.id);
+            }
+            return {
+                column: slot.column,
+                label: slot.label,
+                required: slot.required,
+                items: [...seen].map(([url, outfit_id]) => ({url, outfit_id})),
+            };
+        });
+        const outfits = rows.map(o => ({
+            id: o.id,
+            name: o.name,
+            images: Object.fromEntries(OUTFIT_SLOTS.filter(s => o[s.column]).map(s => [s.column, o[s.column]])),
+        }));
+        return {slots, outfits};
+    } catch (error) {
+        console.error("Database Error: ", error);
+        throw new Error("Failed to fetch your wardrobe.");
     }
 }

@@ -85,3 +85,14 @@ export type DashboardCards = {
     followers: number;
     following: number;
 };
+
+export type WardrobeItem = {
+    url: string;
+    outfit_id: string; // An outfit this piece appears in.
+};
+
+export type Wardrobe = {
+    slots: {column: OutfitImageColumn; label: string; required: boolean; items: WardrobeItem[]}[];
+    // Existing outfits, so the closet can say when a combo is already saved.
+    outfits: {id: string; name: string | null; images: Partial<Record<OutfitImageColumn, string>>}[];
+};

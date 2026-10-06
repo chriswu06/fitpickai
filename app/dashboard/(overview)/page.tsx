@@ -2,7 +2,7 @@ import {Suspense} from "react";
 import {Metadata} from "next";
 import {montserrat} from "@/app/ui/fonts";
 import CardWrapper from "@/app/ui/dashboard/cards";
-import PersonalRatingsChart from "@/app/ui/dashboard/personal-rating-chart";
+import PersonalRatingsChart, {FriendRatingsChart} from "@/app/ui/dashboard/personal-rating-chart";
 import LatestOutfits from "@/app/ui/dashboard/latest-outfits";
 import {CardsSkeleton, RatingsChartSkeleton, LatestOutfitsSkeleton} from "@/app/ui/skeletons";
 
@@ -25,6 +25,9 @@ export default function DashboardPage() {
                 </Suspense>
                 <Suspense fallback={<LatestOutfitsSkeleton />}>
                     <LatestOutfits />
+                </Suspense>
+                <Suspense fallback={<RatingsChartSkeleton />}>
+                    <FriendRatingsChart />
                 </Suspense>
             </div>
         </main>

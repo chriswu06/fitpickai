@@ -1,10 +1,13 @@
 "use client";
 
-import {useEffect, useState} from "react";
+import {useEffect, useState, useTransition} from "react";
 import Link from "next/link";
 import {AnimatePresence, motion, PanInfo} from "motion/react";
-import {ChevronLeftIcon, ChevronRightIcon, SparklesIcon} from "@heroicons/react/24/outline";
+import {ArrowPathIcon, ChevronLeftIcon, ChevronRightIcon, SparklesIcon} from "@heroicons/react/24/outline";
 import {FeedOutfit} from "@/app/lib/definitions";
+import {aiPickOutfit} from "@/app/lib/style-actions";
+import {useLocation} from "@/app/ui/weather/use-location";
+import WeatherStrip from "@/app/ui/weather/weather-strip";
 import {formatDateToLocal} from "@/app/lib/utils";
 import {Button} from "@/app/ui/button";
 import {OutfitImages, RatingSummary} from "@/app/ui/outfits/outfit-card";
@@ -12,7 +15,17 @@ import {OutfitImages, RatingSummary} from "@/app/ui/outfits/outfit-card";
 type Candidate = FeedOutfit & {personal_rating: number};
 
 const SWIPE_THRESHOLD = 80;
-const todayKey = () => `ootd-${new Date().toISOString().split("T")[0]}`;
+const dayKey = (daysAgo = 0) => `ootd-${new Date(Date.now() - daysAgo * 86_400_000).toISOString().split("T")[0]}`;
+const todayKey = () => dayKey();
+
+// Outfits picked on the previous 7 days, so the AI can avoid repeats.
+function recentPicks() {
+    try {
+        return Array.from({length: 7}, (_, i) => localStorage.getItem(dayKey(i + 1))).filter((id): id is string => !!id);
+    } catch {
+        return [];
+    }
+}
 
 // Blend of how you rate it and how friends rate it (friends count once they've rated).
 function score(outfit: Candidate) {
@@ -35,11 +48,17 @@ function pickIndex(outfits: Candidate[], avoid: number) {
 export default function OotdPicker({outfits}: {outfits: Candidate[]}) {
     const [[index, direction], setPage] = useState<[number, number]>([0, 0]);
     const [pickedId, setPickedId] = useState<string | null>(null);
+    const [note, setNote] = useState("");
+    const [reason, setReason] = useState<string | null>(null);
+    const [aiError, setAiError] = useState<string | null>(null);
+    const [isThinking, startThinking] = useTransition();
+    const location = useLocation();
 
     // Restore today's pick so it sticks for the day.
     useEffect(() => {
         try {
             const saved = localStorage.getItem(todayKey());
+            setReason(localStorage.getItem(`${todayKey()}-reason`));
             const savedIndex = outfits.findIndex(o => o.id === saved);
             if (savedIndex >= 0) {
                 setPickedId(saved);
@@ -62,15 +81,36 @@ export default function OotdPicker({outfits}: {outfits: Candidate[]}) {
 
     const go = (step: number) => setPage(([i]) => [(i + step + outfits.length) % outfits.length, step]);
 
-    const pickForMe = () => {
-        const next = pickIndex(outfits, index);
+    const choose = (next: number, why: string | null) => {
         setPage([next, next >= index ? 1 : -1]);
         setPickedId(outfits[next].id);
+        setReason(why);
         try {
             localStorage.setItem(todayKey(), outfits[next].id);
+            if (why) localStorage.setItem(`${todayKey()}-reason`, why);
+            else localStorage.removeItem(`${todayKey()}-reason`);
         } catch {
             // Ignore storage failures.
         }
+    };
+
+    const surpriseMe = () => {
+        setAiError(null);
+        choose(pickIndex(outfits, index), null);
+    };
+
+    const askAi = () => {
+        setAiError(null);
+        startThinking(async () => {
+            const result = await aiPickOutfit(note, recentPicks(), location.coords);
+            const next = result.outfitId ? outfits.findIndex(o => o.id === result.outfitId) : -1;
+            if (next < 0) {
+                setAiError(`${result.error ?? "FitPickAI picked an outfit that's no longer in rotation."} Here's a random pick instead.`);
+                choose(pickIndex(outfits, index), null);
+            } else {
+                choose(next, result.reason ?? null);
+            }
+        });
     };
 
     const onDragEnd = (_: unknown, info: PanInfo) => {
@@ -82,6 +122,9 @@ export default function OotdPicker({outfits}: {outfits: Candidate[]}) {
 
     return (
         <div className="mx-auto flex max-w-xl flex-col items-center gap-4">
+            <div className="w-full">
+                <WeatherStrip {...location} days={3} />
+            </div>
             <div className="flex w-full items-center gap-2">
                 <button type="button" onClick={() => go(-1)} aria-label="Previous outfit" className="rounded-full p-2 hover:bg-gray-100">
                     <ChevronLeftIcon className="h-6 w-6" />
@@ -127,9 +170,33 @@ export default function OotdPicker({outfits}: {outfits: Candidate[]}) {
                 </button>
             </div>
             <p className="text-xs text-gray-500">{index + 1} of {outfits.length} · swipe or use the arrows</p>
-            <Button type="button" onClick={pickForMe} className="bg-pink-500 hover:bg-pink-400 active:bg-pink-600">
-                <SparklesIcon className="mr-2 h-5 w-5" /> Pick for me
-            </Button>
+            {reason && pickedId === outfit.id && (
+                <p className="w-full rounded-lg bg-pink-50 p-3 text-sm text-pink-900">{reason}</p>
+            )}
+            <div className="w-full">
+                <label htmlFor="ootd-note" className="mb-1 block text-sm font-medium">What&apos;s today looking like?</label>
+                <input
+                    id="ootd-note"
+                    type="text"
+                    value={note}
+                    maxLength={500}
+                    onChange={(e) => setNote(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter" && !isThinking) askAi();
+                    }}
+                    placeholder="e.g. coffee with friends, then a presentation"
+                    className="block w-full rounded-md border border-gray-200 px-3 py-2 text-sm placeholder:text-gray-400"
+                />
+            </div>
+            <div className="flex flex-wrap justify-center gap-3">
+                <Button type="button" onClick={askAi} disabled={isThinking} aria-disabled={isThinking} className="bg-pink-500 hover:bg-pink-400 active:bg-pink-600">
+                    <SparklesIcon className="mr-2 h-5 w-5" /> {isThinking ? "Picking..." : "Pick for me"}
+                </Button>
+                <Button type="button" onClick={surpriseMe} disabled={isThinking} aria-disabled={isThinking} className="bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300">
+                    <ArrowPathIcon className="mr-2 h-5 w-5" /> Surprise me
+                </Button>
+            </div>
+            {aiError && <p className="text-center text-xs text-gray-500" aria-live="polite">{aiError}</p>}
         </div>
     );
 }

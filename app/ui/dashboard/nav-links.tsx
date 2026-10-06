@@ -4,7 +4,10 @@ import {
     UserPlusIcon,
     HomeIcon,
     BookmarkIcon,
-    FireIcon
+    FireIcon,
+    RectangleStackIcon,
+    ScaleIcon,
+    SparklesIcon
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import {usePathname} from "next/navigation";
@@ -18,10 +21,19 @@ const links = [
         name: "Outfits", href: "/dashboard/outfits", icon: BookmarkIcon
     },
     {
+        name: "Wardrobe", href: "/dashboard/wardrobe", icon: RectangleStackIcon
+    },
+    {
         name: "Connect", href: "/dashboard/connect", icon: UserPlusIcon
     },
     {
         name: "OOTD", href: "/dashboard/OOTD", icon: FireIcon
+    },
+    {
+        name: "Buy?", href: "/dashboard/check", icon: ScaleIcon
+    },
+    {
+        name: "Try On", href: "/dashboard/try-on", icon: SparklesIcon
     }
 ]
 

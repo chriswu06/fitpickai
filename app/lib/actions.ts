@@ -1,6 +1,7 @@
 "use server";
 import {revalidatePath} from "next/cache";
 import {redirect} from "next/navigation";
+import {after} from "next/server";
 import {signIn, checkName, checkEmail, checkPassword} from "@/auth";
 import {AuthError} from "next-auth";
 import {z} from "zod";
@@ -9,6 +10,7 @@ import {sql} from "@/app/lib/db";
 import {requireUserId} from "@/app/lib/session";
 import {OUTFIT_SLOTS, Outfit, OutfitImageColumn} from "@/app/lib/definitions";
 import {isUploadedFile, validateImage, uploadOutfitImage, deleteOutfitImages} from "@/app/lib/storage";
+import {tagUntaggedGarments} from "@/app/lib/closet";
 
 const UserSchema = z.object({
     id: z.string(),
@@ -139,6 +141,22 @@ async function uploadAll(userId: string, files: {column: OutfitImageColumn; key:
 
 const today = () => new Date().toISOString().split("T")[0];
 
+// Tag new clothing photos with the AI once the response has gone out, so saving never waits on it.
+const tagInBackground = (userId: string) => after(() => tagUntaggedGarments(userId).catch(e => console.error("Tagging Error: ", e)));
+
+// Wardrobe outfits reuse photos from other outfits, so only delete images no outfit points at anymore.
+async function deleteUnusedImages(urls: (string | null | undefined)[]) {
+    const candidates = [...new Set(urls.filter((u): u is string => !!u))];
+    if (candidates.length === 0) return;
+    const columns = sql(OUTFIT_SLOTS.map(s => s.column));
+    const stillUsed = await sql<{url: string}[]>`
+        SELECT u AS url FROM unnest(${candidates}::text[]) AS u
+        WHERE EXISTS (SELECT 1 FROM outfits WHERE u IN (${columns}))
+    `;
+    const used = new Set(stillUsed.map(r => r.url));
+    await deleteOutfitImages(candidates.filter(u => !used.has(u)));
+}
+
 export async function createOutfit(prevState: OutfitState | undefined, formData: FormData): Promise<OutfitState | undefined> {
     const userId = await requireUserId();
     const details = parseOutfitDetails(formData);
@@ -180,6 +198,7 @@ export async function createOutfit(prevState: OutfitState | undefined, formData:
         await deleteOutfitImages(Object.values(uploaded));
         return {errors: null, message: "Database error. Failed to create outfit."};
     }
+    tagInBackground(userId);
     revalidatePath("/dashboard", "layout");
     redirect("/dashboard/outfits");
 }
@@ -231,7 +250,8 @@ export async function updateOutfit(id: string, prevState: OutfitState | undefine
         await deleteOutfitImages(Object.values(uploaded));
         return {errors: null, message: "Database error. Failed to update outfit."};
     }
-    await deleteOutfitImages(replacedUrls);
+    await deleteUnusedImages(replacedUrls);
+    tagInBackground(userId);
     revalidatePath("/dashboard", "layout");
     redirect("/dashboard/outfits");
 }
@@ -243,7 +263,7 @@ export async function deleteOutfit(id: string) {
         return tx<Outfit[]>`DELETE FROM outfits WHERE id = ${id} AND user_id = ${userId} RETURNING *`;
     });
     if (deleted[0]) {
-        await deleteOutfitImages(OUTFIT_SLOTS.map(s => deleted[0][s.column]));
+        await deleteUnusedImages(OUTFIT_SLOTS.map(s => deleted[0][s.column]));
     }
     revalidatePath("/dashboard", "layout");
 }
@@ -275,11 +295,20 @@ export async function rateOutfit(outfitId: string, rating: number) {
     const [outfit] = await sql`SELECT user_id FROM outfits WHERE id = ${outfitId}`;
     if (!outfit) return {message: "Outfit not found."};
     if (outfit.user_id === userId) return {message: "You can't rate your own outfit here. Edit it instead."};
-    await sql`
-        INSERT INTO outfit_ratings (rater_id, outfit_id, rating, date)
-        VALUES (${userId}, ${outfitId}, ${parsed.data}, ${today()})
-        ON CONFLICT (rater_id, outfit_id) DO UPDATE SET rating = EXCLUDED.rating, date = EXCLUDED.date
-    `;
+    const date = today();
+    await sql.begin(async (tx) => {
+        await tx`
+            INSERT INTO outfit_ratings (rater_id, outfit_id, rating, date)
+            VALUES (${userId}, ${outfitId}, ${parsed.data}, ${date})
+            ON CONFLICT (rater_id, outfit_id) DO UPDATE SET rating = EXCLUDED.rating, date = EXCLUDED.date
+        `;
+        // Trend history for the owner's dashboard; one entry per rater per day.
+        await tx`
+            INSERT INTO outfit_rating_history (rater_id, outfit_id, rating, date)
+            VALUES (${userId}, ${outfitId}, ${parsed.data}, ${date})
+            ON CONFLICT (rater_id, outfit_id, date) DO UPDATE SET rating = EXCLUDED.rating
+        `;
+    });
     revalidatePath("/dashboard", "layout");
     return {message: null};
 }
@@ -306,4 +335,57 @@ export async function authenticate(
 export async function signInWithGoogle(formData: FormData) {
     const redirectTo = formData.get("redirectTo");
     await signIn("google", {redirectTo: typeof redirectTo === "string" ? redirectTo : "/dashboard"});
+}
+
+const MixSchema = z.object({
+    name: z.preprocess(blankToUndefined, z.string().trim().max(255, {message: "Name must be 255 characters or fewer."}).optional()),
+    personalRating: z.coerce.number({message: "Please select a rating."}).int().min(0).max(10),
+    images: z.record(z.string(), z.string().url()),
+});
+
+// Saves a combination of existing wardrobe pieces as a new outfit. Every image must already belong
+// to one of the user's outfits in the same slot, so nobody can attach someone else's photos.
+export async function createOutfitFromWardrobe(input: {name?: string; personalRating: number; images: Partial<Record<OutfitImageColumn, string>>}) {
+    const userId = await requireUserId();
+    const parsed = MixSchema.safeParse(input);
+    if (!parsed.success) return {message: parsed.error.issues[0]?.message ?? "Invalid outfit."};
+    const {name, personalRating, images} = parsed.data;
+
+    const row: Record<string, string | number | null> = {};
+    for (const slot of OUTFIT_SLOTS) {
+        const url = images[slot.column] ?? null;
+        if (slot.required && !url) return {message: `Pick a ${slot.label.toLowerCase()}.`};
+        if (url) {
+            const [owned] = await sql`
+                SELECT 1 FROM outfits WHERE user_id = ${userId} AND ${sql(slot.column)} = ${url} LIMIT 1
+            `;
+            if (!owned) return {message: `That ${slot.label.toLowerCase()} isn't in your wardrobe.`};
+        }
+        row[slot.column] = url;
+    }
+
+    const date = today();
+    try {
+        const [user] = await sql<{name: string}[]>`SELECT name FROM users WHERE id = ${userId}`;
+        Object.assign(row, {
+            user_id: userId,
+            date,
+            name: name ?? `${user?.name ?? "My"}'s outfit - ${date}`,
+            personal_rating: personalRating,
+            rotation_status: "In rotation",
+        });
+        await sql.begin(async (tx) => {
+            const [outfit] = await tx`INSERT INTO outfits ${tx(row)} RETURNING id`;
+            await tx`
+                INSERT INTO personal_ratings (user_id, outfit_id, date, rating)
+                VALUES (${userId}, ${outfit.id}, ${date}, ${personalRating})
+            `;
+        });
+    } catch (error) {
+        console.error("Database Error: ", error);
+        return {message: "Database error. Failed to save outfit."};
+    }
+    tagInBackground(userId);
+    revalidatePath("/dashboard", "layout");
+    redirect("/dashboard/outfits");
 }

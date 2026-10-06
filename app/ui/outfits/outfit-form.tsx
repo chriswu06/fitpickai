@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import {useActionState, useEffect, useState, startTransition} from "react";
+import {useActionState, useEffect, useRef, useState, startTransition} from "react";
 import {PhotoIcon, XMarkIcon} from "@heroicons/react/24/outline";
+import QuickAdd, {Injected} from "@/app/ui/outfits/quick-add";
+import {removeBackground} from "@/app/ui/images/cutout";
 import clsx from "clsx";
 import {Button} from "@/app/ui/button";
 import {OutfitState} from "@/app/lib/actions";
-import {Outfit, OutfitSlot, OUTFIT_SLOTS} from "@/app/lib/definitions";
+import {Outfit, OutfitSlot, OutfitSlotKey, OUTFIT_SLOTS} from "@/app/lib/definitions";
 import {compressImage} from "@/app/ui/outfits/compress-image";
 
 type OutfitAction = (prevState: OutfitState | undefined, formData: FormData) => Promise<OutfitState | undefined>;
@@ -24,9 +26,34 @@ function FieldError({id, errors}: {id: string; errors?: string[]}) {
     );
 }
 
-function ImagePicker({slot, existingUrl, errors}: {slot: OutfitSlot; existingUrl?: string | null; errors?: string[]}) {
+function ImagePicker({slot, existingUrl, errors, injected, clean}: {
+    slot: OutfitSlot;
+    existingUrl?: string | null;
+    errors?: string[];
+    injected?: Injected;
+    clean: boolean;
+}) {
     const [preview, setPreview] = useState<string | null>(null);
     const [removed, setRemoved] = useState(false);
+    const [isCleaning, setIsCleaning] = useState(false);
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    // Puts a file into the real <input> so it's submitted with the form like a picked one.
+    const applyFile = (file: File) => {
+        if (inputRef.current) {
+            const transfer = new DataTransfer();
+            transfer.items.add(file);
+            inputRef.current.files = transfer.files;
+        }
+        setPreview(URL.createObjectURL(file));
+        setRemoved(false);
+    };
+
+    // Photos from a scan or a shop link arrive here already cleaned up.
+    useEffect(() => {
+        if (injected) applyFile(injected.file);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- re-run only for a new injection
+    }, [injected]);
 
     useEffect(() => () => {
         if (preview) URL.revokeObjectURL(preview);
@@ -44,6 +71,9 @@ function ImagePicker({slot, existingUrl, errors}: {slot: OutfitSlot; existingUrl
                     errors?.length ? "border-red-400" : "border-gray-300",
                 )}
             >
+                {isCleaning && (
+                    <span className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 text-xs text-gray-600">Removing background...</span>
+                )}
                 {shown ? (
                     // eslint-disable-next-line @next/next/no-img-element -- previews are blob: URLs
                     <img src={shown} alt={`${slot.label} preview`} className="h-full w-full object-contain" />
@@ -54,16 +84,23 @@ function ImagePicker({slot, existingUrl, errors}: {slot: OutfitSlot; existingUrl
                     </>
                 )}
                 <input
+                    ref={inputRef}
                     id={slot.key}
                     name={slot.key}
                     type="file"
                     accept="image/*"
                     className="sr-only"
                     aria-describedby={errorId}
-                    onChange={(e) => {
+                    onChange={async (e) => {
                         const file = e.target.files?.[0];
                         setPreview(file ? URL.createObjectURL(file) : null);
-                        if (file) setRemoved(false);
+                        if (!file) return;
+                        setRemoved(false);
+                        if (clean) {
+                            setIsCleaning(true);
+                            applyFile(await removeBackground(file, slot.key));
+                            setIsCleaning(false);
+                        }
                     }}
                 />
             </label>
@@ -103,7 +140,14 @@ export default function OutfitForm({
     const [isCompressing, setIsCompressing] = useState(false);
     const isPending = isActionPending || isCompressing;
     const errors = state?.errors ?? {};
-    const hasAccessories = ACCESSORY_SLOTS.some(s => outfit?.[s.column]);
+    const [injected, setInjected] = useState<Partial<Record<OutfitSlotKey, Injected>>>({});
+    const [clean, setClean] = useState(true);
+    const [accessoriesOpen, setAccessoriesOpen] = useState(ACCESSORY_SLOTS.some(s => outfit?.[s.column]));
+
+    const inject = (slot: OutfitSlotKey, file: File) => {
+        setInjected(prev => ({...prev, [slot]: {file, id: crypto.randomUUID()}}));
+        if (ACCESSORY_SLOTS.some(s => s.key === slot)) setAccessoriesOpen(true);
+    };
 
     return (
         <form
@@ -127,6 +171,11 @@ export default function OutfitForm({
             }}
         >
             <div className="rounded-md bg-gray-50 p-4 md:p-6">
+                <QuickAdd onGarment={inject} clean={clean} />
+                <label className="mb-6 flex items-center gap-2 text-sm text-gray-600">
+                    <input type="checkbox" checked={clean} onChange={(e) => setClean(e.target.checked)} />
+                    Remove photo backgrounds automatically (runs on your device)
+                </label>
                 <div className="mb-6">
                     <label htmlFor="name" className="mb-2 block text-sm font-medium">Outfit name</label>
                     <input
@@ -145,16 +194,16 @@ export default function OutfitForm({
                     <legend className="mb-2 block text-sm font-medium">The essentials</legend>
                     <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
                         {REQUIRED_SLOTS.map(slot => (
-                            <ImagePicker key={slot.key} slot={slot} existingUrl={outfit?.[slot.column]} errors={errors[slot.key]} />
+                            <ImagePicker key={slot.key} slot={slot} existingUrl={outfit?.[slot.column]} errors={errors[slot.key]} injected={injected[slot.key]} clean={clean} />
                         ))}
                     </div>
                 </fieldset>
 
-                <details className="mb-6" open={hasAccessories}>
+                <details className="mb-6" open={accessoriesOpen} onToggle={(e) => setAccessoriesOpen(e.currentTarget.open)}>
                     <summary className="mb-2 cursor-pointer text-sm font-medium">Accessories (optional)</summary>
                     <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                         {ACCESSORY_SLOTS.map(slot => (
-                            <ImagePicker key={slot.key} slot={slot} existingUrl={outfit?.[slot.column]} errors={errors[slot.key]} />
+                            <ImagePicker key={slot.key} slot={slot} existingUrl={outfit?.[slot.column]} errors={errors[slot.key]} injected={injected[slot.key]} clean={clean} />
                         ))}
                     </div>
                 </details>

@@ -1,5 +1,4 @@
 import {josefinSans} from "@/app/ui/fonts";
-import Logo from "@/app/FitPickAI.svg";
 import Image from "next/image";
 import clsx from "clsx";
 
@@ -9,7 +8,7 @@ export default function FitPickAILogo({variant = "compact"}: {variant?: "hero" |
     return (
         <div className={clsx(josefinSans.className, "flex leading-none", hero ? "flex-col items-center gap-4" : "flex-row items-center gap-2")}>
             <Image
-                src={Logo}
+                src="/FitPickAI.svg"
                 alt="FitPickAI Logo"
                 width={200}
                 height={200}

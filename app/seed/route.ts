@@ -101,6 +101,33 @@ async function seedSocial() {
             PRIMARY KEY (rater_id, outfit_id)
         );
     `;
+    // Kept in sync with migrations/002_rating_history.sql.
+    await sql`
+        CREATE TABLE IF NOT EXISTS outfit_rating_history (
+            rater_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            outfit_id UUID NOT NULL REFERENCES outfits(id) ON DELETE CASCADE,
+            rating INT NOT NULL CHECK (rating BETWEEN 0 AND 10),
+            date DATE NOT NULL DEFAULT CURRENT_DATE,
+            PRIMARY KEY (rater_id, outfit_id, date)
+        );
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS outfit_rating_history_outfit_id_idx ON outfit_rating_history(outfit_id)`;
+    // Kept in sync with migrations/003_garment_tags.sql.
+    await sql`
+        CREATE TABLE IF NOT EXISTS garment_tags (
+            image_url TEXT PRIMARY KEY,
+            user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            category VARCHAR(20) NOT NULL,
+            color_family VARCHAR(20) NOT NULL,
+            pattern VARCHAR(20) NOT NULL,
+            warmth INT NOT NULL CHECK (warmth BETWEEN 1 AND 5),
+            waterproof BOOLEAN NOT NULL,
+            formality INT NOT NULL CHECK (formality BETWEEN 1 AND 5),
+            description VARCHAR(120) NOT NULL,
+            tagged_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+    `;
+    await sql`CREATE INDEX IF NOT EXISTS garment_tags_user_id_idx ON garment_tags(user_id)`;
     await sql`CREATE INDEX IF NOT EXISTS outfits_user_id_idx ON outfits(user_id)`;
     await sql`CREATE INDEX IF NOT EXISTS follows_following_id_idx ON follows(following_id)`;
     await sql`CREATE INDEX IF NOT EXISTS outfit_ratings_outfit_id_idx ON outfit_ratings(outfit_id)`;
@@ -112,6 +139,8 @@ export async function GET() {
         return Response.json({error: "Seeding is disabled in production."}, {status: 403});
     }
     try {
+        await sql`DROP TABLE IF EXISTS garment_tags CASCADE`;
+        await sql`DROP TABLE IF EXISTS outfit_rating_history CASCADE`;
         await sql`DROP TABLE IF EXISTS outfit_ratings CASCADE`;
         await sql`DROP TABLE IF EXISTS follows CASCADE`;
         await sql`DROP TABLE IF EXISTS personal_ratings CASCADE`;
