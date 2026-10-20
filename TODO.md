@@ -5,8 +5,8 @@
 - [ ] Add `https://fitpickai.vercel.app` (origin) and `https://fitpickai.vercel.app/api/auth/callback/google` (redirect) to the Google OAuth client
 - [x] Claude API: set `ANTHROPIC_API_KEY` (console.anthropic.com) to turn on the AI outfit pick and smart "shop similar" searches. Without it, OOTD falls back to the weighted random pick and shopping searches by item type.
 - [x] `AMAZON_ASSOCIATE_TAG` (Associates account is provisional until 3 sales in 180 days)
-- [ ] `HF_TOKEN` (free Hugging Face read token) for try-on. Without it the shared anonymous GPU quota allows about one render a day.
-- [ ] Vercel: add every `.env` variable in Project Settings > Environment Variables; try-on needs Fluid Compute (or Pro) for its 300s limit
+- [x] `HF_TOKEN` (free Hugging Face read token) for try-on. Without it the shared anonymous GPU quota allows about one render a day.
+- [x] Vercel: add every `.env` variable in Project Settings > Environment Variables; try-on needs Fluid Compute (or Pro) for its 300s limit
 
 ## Done
 - [x] Outfit create/edit forms with photo upload to Supabase Storage (bucket `outfits`, auto-created)

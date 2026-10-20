@@ -18,7 +18,7 @@ Visit [fitpickai.vercel.app](https://fitpickai.vercel.app/), or developers can a
 ### 1. Clone Repo
 
 ```bash
-git clone https://github.com/cheesuschris/fitpickai.git
+git clone https://github.com/chriswu06/fitpickai.git
 cd fitpickai
 ```
 
